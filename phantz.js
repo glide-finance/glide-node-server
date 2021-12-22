@@ -147,79 +147,89 @@ cron.schedule("*/12 * * * *", async function () {
       let manualGlideStaking = response.data.data.manualGlideStakings;
 
       //get auto glide stake amount
-      /*
-            body = {
-                query: `
-                    query {
-                        autoGlideStakings(first: 5, where: {id: "`+ key.toLowerCase() +`"}) {
-                            id
-                            stakeAmount
-                        }
-                    }
-                `
-            }
-            response = await axios.post(url, body, { headers: headers })
-            console.log(JSON.stringify(response.data))
-            */
+      body = {
+          query: `
+              query {
+                  autoGlideStakings(first: 5, where: {id: "`+ key.toLowerCase() +`"}) {
+                      id
+                      stakeAmount
+                  }
+              }
+          `
+      }
+      response = await axios.post(url, body, { headers: headers })
+      console.log(JSON.stringify(response.data));
+      let autoGlideStaking = response.data.data.autoGlideStakings;
 
+      let manualGlideStakeAmount = ethers.BigNumber.from(0);
       if (manualGlideStaking.length > 0) {
         let manualGlideStakingObj = manualGlideStaking[0];
-        let manualGlideStakeAmount = ethers.BigNumber.from(manualGlideStakingObj.stakeAmount);
-        if (manualGlideStakeAmount > 0) {
-          // total projectect glide per year
-          let totalProjectedGlidePerYear = manualGlideStakeAmount.mul(
-            ethers.BigNumber.from(Math.round(stakingAPR * 10000))
-          );
-          totalProjectedGlidePerYear = totalProjectedGlidePerYear.div(10000);
-          console.log("totalProjectedGlidePerYear", totalProjectedGlidePerYear.toString());
+        manualGlideStakeAmount = ethers.BigNumber.from(manualGlideStakingObj.stakeAmount);
+      }
 
-          // weighting factor per phantz holding
-          let weightingFactor = 0;
-          switch (value) {
-            case 1:
-              weightingFactor = 0.07 * 10000;
-              break;
-            case 2:
-              weightingFactor = 0.14 * 10000;
-              break;
-            default:
-              weightingFactor = 0.2822 * 10000;
-          }
+      let autoGlideStakeAmount = ethers.BigNumber.from(0);
+      if (autoGlideStaking.length > 0) {
+        let autoGlideStakingObj = autoGlideStaking[0];
+        autoGlideStakeAmount = ethers.BigNumber.from(autoGlideStakingObj.stakeAmount);
+      }
 
-          // calculate bonus glide per year
-          let bonusGlide = totalProjectedGlidePerYear
-            .mul(ethers.BigNumber.from(Math.round(weightingFactor)))
-            .div(10000);
-          console.log("bonusGlide", bonusGlide.toString());
+      if (manualGlideStakeAmount > 0 || autoGlideStakeAmount > 0) {
+        let sumStakeAmount = manualGlideStakeAmount.add(autoGlideStakeAmount);
+        console.log("sumStakeAmount", sumStakeAmount.toString());
 
-          // glide per block
-          let glidePerBlock = bonusGlide.div(365).div(24).div(60).div(12);
-          console.log("glidePerBlock", glidePerBlock.toString());
+        // total projectect glide per year
+        let totalProjectedGlidePerYear = sumStakeAmount.mul(
+          ethers.BigNumber.from(Math.round(stakingAPR * 10000))
+        );
+        totalProjectedGlidePerYear = totalProjectedGlidePerYear.div(10000);
+        console.log("totalProjectedGlidePerYear", totalProjectedGlidePerYear.toString());
 
-          // add glide reward
-          console.log("minutes since last update", (currentBlock - lastUpdatedBlock) / 12);
-          let glideReward = glidePerBlock.mul(currentBlock - lastUpdatedBlock);
-          //   let glideReward = glidePerBlock;
-          console.log("glideReward", glideReward.toString());
+        // weighting factor per phantz holding
+        let weightingFactor = 0;
+        switch (value) {
+          case 1:
+            weightingFactor = 0.07 * 10000;
+            break;
+          case 2:
+            weightingFactor = 0.14 * 10000;
+            break;
+          default:
+            weightingFactor = 0.2822 * 10000;
+        }
 
-          // send glide reward
-          const tokenAllowance = await glideTokenInstance
+        // calculate bonus glide per year
+        let bonusGlide = totalProjectedGlidePerYear
+          .mul(ethers.BigNumber.from(Math.round(weightingFactor)))
+          .div(10000);
+        console.log("bonusGlide", bonusGlide.toString());
+
+        // glide per block
+        let glidePerBlock = bonusGlide.div(365).div(24).div(60).div(12);
+        console.log("glidePerBlock", glidePerBlock.toString());
+
+        // add glide reward
+        console.log("minutes since last update", (currentBlock - lastUpdatedBlock) / 12);
+        let glideReward = glidePerBlock.mul(currentBlock - lastUpdatedBlock);
+        //   let glideReward = glidePerBlock;
+        console.log("glideReward", glideReward.toString());
+
+        // send glide reward
+        const tokenAllowance = await glideTokenInstance
+          .connect(mnemonicWallet)
+          .allowance(walletAddress, phantzGlideStakeAddress);
+        if (tokenAllowance.lt(glideReward)) {
+          let allowanceLocal = glideReward.sub(tokenAllowance);
+          let tx = await glideTokenInstance
             .connect(mnemonicWallet)
-            .allowance(walletAddress, phantzGlideStakeAddress);
-          if (tokenAllowance.lt(glideReward)) {
-            let allowanceLocal = glideReward.sub(tokenAllowance);
-            let tx = await glideTokenInstance
-              .connect(mnemonicWallet)
-              .increaseAllowance(phantzGlideStakeAddress, allowanceLocal.toString());
-            await tx.wait();
-          }
-
-          // add glide reward
-          let tx = await phantzGlideContract
-            .connect(mnemonicWallet)
-            ["addGlideReward(address,uint256)"](key, glideReward.toString(), { gasLimit: 1000000 });
+            .increaseAllowance(phantzGlideStakeAddress, allowanceLocal.toString());
           await tx.wait();
         }
+
+        // add glide reward
+        let tx = await phantzGlideContract
+          .connect(mnemonicWallet)
+          ["addGlideReward(address,uint256)"](key, glideReward.toString(), { gasLimit: 1000000 });
+        await tx.wait();
       }
     }
 
