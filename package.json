@@ -1,7 +1,7 @@
 {
   "license": "MIT",
   "scripts": {
-    "start": "node index > output.log"
+    "start:phantz": "node phantz > output.log"
   },
   "devDependencies": {
     "axios": "^0.24.0",
