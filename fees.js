@@ -6,7 +6,6 @@ const fs = require("fs");
 const secrets = require("./secrets.json");
 
 const mnemonic = secrets.mnemonic;
-
 const app = express(); // Initializing app
 
 //const url = "http://localhost:8545";
