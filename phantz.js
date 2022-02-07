@@ -17,9 +17,9 @@ const url = "https://escrpc.elaphant.app";
 
 const masterChefAddress = "0x7F5489f77Bb8515DE4e0582B60Eb63A7D9959821";
 const glideVaultAddress = "0xBe224bb2EFe1aE7437Ab428557d3054E63033dA9";
-const wElaAddress = "0x517E9e5d46C1EA8aB6f78677d6114Ef47F71f6c4";
 const glideAddress = "0xd39eC832FF1CaaFAb2729c76dDeac967ABcA8F27";
-const phantzGlideStakeAddress = "0xd696856d09843C82812e6beb14dCD7B98702dDAd";
+const phantzGlideStakeAddressOld = "0xbe080A1Fee90c12fC7F308590DC56929E407aA6E";
+const phantzGlideStakeAddressNew = "0xf40731508cD7a9870C2690420728ecE1b8335953";
 
 const customHttpProvider = new ethers.providers.JsonRpcProvider(url);
 const mnemonicWallet = ethers.Wallet.fromMnemonic(mnemonic).connect(customHttpProvider);
@@ -38,7 +38,8 @@ const glideVaultContract = new ethers.Contract(glideVaultAddress, glideVaultCont
 
 const phantzGlideStakeParse = JSON.parse(fs.readFileSync("./contracts/PhantzGlideStake.json", "utf8"));
 const phantzGlideStakeABI = JSON.stringify(phantzGlideStakeParse);
-const phantzGlideContract = new ethers.Contract(phantzGlideStakeAddress, phantzGlideStakeABI, mnemonicWallet);
+const phantzGlideContractOld = new ethers.Contract(phantzGlideStakeAddressOld, phantzGlideStakeABI, mnemonicWallet);
+const phantzGlideContractNew = new ethers.Contract(phantzGlideStakeAddressNew, phantzGlideStakeABI, mnemonicWallet);
 
 // Phantz - Glide
 // cron.schedule("*/60 * * * * *", async function () {
@@ -64,7 +65,66 @@ cron.schedule("*/10 * * * *", async function () {
     });
   }
 
-  async function calculateStakingAPR() {
+  async function calculateGlidePerYear() {
+    try {
+      const blockPerYear = 12 * 60 * 24 * 365; // 12 blocks per minute (one block per 5 seconds) * 60 minutes * 24 hours * 365
+      const startBlock = await masterChefContract.startBlock();
+      const bonusPeriod = await masterChefContract.bonusPeriod();
+      const reductionPeriod = await masterChefContract.reductionPeriod();
+      const startGlidePerBlock = await masterChefContract.glidePerBlock();
+      const currentBlock = ethers.BigNumber.from(await customHttpProvider.getBlockNumber());
+
+      // console.log(startBlock.toString());
+      // console.log(bonusPeriod.toString());
+      // console.log(reductionPeriod.toString());
+      // console.log(startGlidePerBlock.toString());
+      // console.log(currentBlock.toString());
+
+      let phase = 0;
+      let counterBlock = startBlock.add(bonusPeriod);
+      let counterCurrentBlock = currentBlock;
+      let counterGlidePerBlock = startGlidePerBlock;
+      let glideSumPerYear = ethers.BigNumber.from("0");
+
+      while(true) {
+        // if it is last phase on year and should be finish calculation
+        if (counterBlock.gte(currentBlock.add(blockPerYear))) {
+          const blockDifference = counterBlock.sub(reductionPeriod);
+          glideSumPerYear = glideSumPerYear.add(counterGlidePerBlock.mul(currentBlock.add(blockPerYear).sub(blockDifference)));
+          break; 
+        } else {
+          if (counterBlock.gt(counterCurrentBlock)) {
+            // console.log(counterBlock.toString());
+            // console.log(counterCurrentBlock.toString());
+            // console.log(counterGlidePerBlock.toString());
+            // calculate glide sum per year
+            glideSumPerYear = glideSumPerYear.add(counterGlidePerBlock.mul(counterBlock.sub(counterCurrentBlock)));
+          }
+
+          // updates
+          if (phase == 0) {
+            counterGlidePerBlock = counterGlidePerBlock.mul(ethers.BigNumber.from("75")).div(ethers.BigNumber.from("100"));
+          } else {
+            counterGlidePerBlock = counterGlidePerBlock.mul(ethers.BigNumber.from("85")).div(ethers.BigNumber.from("100"));
+          }
+          phase++;
+          if (counterBlock.gte(counterCurrentBlock)) {
+            counterCurrentBlock = counterBlock;
+          }
+          counterBlock = counterBlock.add(reductionPeriod);
+        }
+      }
+
+      const tokenDistributedToStakingPools = ethers.utils.formatEther(glideSumPerYear
+        .mul(ethers.BigNumber.from("65")).div(ethers.BigNumber.from("100"))
+        .mul(ethers.BigNumber.from("25")).div(ethers.BigNumber.from("100")));
+      return Math.trunc(tokenDistributedToStakingPools);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async function calculateStakingAPR(tokenDistributedToStakingPools) {
     var masterChefGlideAmount = 0;
     const glideTokenInstance = new ethers.Contract(glideAddress, IERC20ContractAbi, mnemonicWallet);
     try {
@@ -75,9 +135,11 @@ cron.schedule("*/10 * * * *", async function () {
       return 0;
     }
 
+    if (masterChefGlideAmount == 0) 
+      return 0;
+
     // This value for token distributed to staking pools per year currently is hardcoded, change that to real calculate
-    if (masterChefGlideAmount == 0) return 0;
-    return 3074760 / ethers.utils.formatEther(masterChefGlideAmount);
+    return tokenDistributedToStakingPools / ethers.utils.formatEther(masterChefGlideAmount);
   }
 
   async function calculateVaultBalance(address, pricePerFullShare) {
@@ -100,7 +162,7 @@ cron.schedule("*/10 * * * *", async function () {
 
   async function getLastUpdatedBlock() {
     try {
-      const lastUpdatedBlock = await phantzGlideContract.lastUpdatedBlock();
+      const lastUpdatedBlock = await phantzGlideContractOld.lastUpdatedBlock();
       return lastUpdatedBlock;
     } catch (error) {
       console.log("lastUpdatedBlock-error" + ": " + error);
@@ -108,12 +170,15 @@ cron.schedule("*/10 * * * *", async function () {
     }
   }
 
+  const tokenDistributedToStakingPools = await calculateGlidePerYear();
+  console.log("GlideSumPerYear: " + tokenDistributedToStakingPools);
+
   // Get phantz holders
   let fullResultString = await requestPhantzHolders(phantzCollectionUrl);
   let fullResult = JSON.parse(fullResultString);
   const phantzHolders = new Map();
   try {
-    let resultData = fullResult["data"]["result"];
+    let resultData = fullResult["data"];
     for (let counter = 0; counter < resultData.length; counter++) {
       let item = resultData[counter];
       let nftHolder = item["holder"];
@@ -129,7 +194,7 @@ cron.schedule("*/10 * * * *", async function () {
       console.log(key + " = " + value);
     }
 
-    const stakingAPR = await calculateStakingAPR();
+    const stakingAPR = await calculateStakingAPR(tokenDistributedToStakingPools);
     console.log(stakingAPR);
 
     const lastUpdatedBlock = await getLastUpdatedBlock();
@@ -147,6 +212,9 @@ cron.schedule("*/10 * * * *", async function () {
     const pricePerFullShare = await glideVaultContract.getPricePerFullShare();
     console.log("pricePerFullSHare: " + pricePerFullShare.toString());
 
+    let addressesForSend = [];
+    let amountsForSend = [];
+    let counter = 0;
     for (const [key, value] of phantzHolders) {
       const url = "https://api.glidefinance.io/subgraphs/name/glide/glide-staking";
       const headers = {
@@ -168,32 +236,20 @@ cron.schedule("*/10 * * * *", async function () {
       let response = await axios.post(url, body, { headers: headers });
       console.log(JSON.stringify(response.data));
       let manualGlideStaking = response.data.data.manualGlideStakings;
-      let autoGlideStaking = await calculateVaultBalance(key, pricePerFullShare);
-      //get auto glide stake amount
-      /*
-            body = {query: `
-                    query {
-                        autoGlideStakings(first: 5, where: {id: "`+ key.toLowerCase() +`"}) {
-                            id
-                            stakeAmount
-                        }
-                    }
-                `
-            }
-            response = await axios.post(url, body, { headers: headers })
-            console.log(JSON.stringify(response.data))
-      */
 
       let manualGlideStakeAmount = ethers.BigNumber.from(0);
       if (manualGlideStaking.length > 0) {
         let manualGlideStakingObj = manualGlideStaking[0];
         manualGlideStakeAmount = ethers.BigNumber.from(manualGlideStakingObj.stakeAmount);
       }
+
+      let autoGlideStaking = await calculateVaultBalance(key, pricePerFullShare);
       let autoGlideStakeAmount = autoGlideStaking;
 
       if (manualGlideStakeAmount > 0 || autoGlideStakeAmount > 0) {
         let sumStakeAmount = manualGlideStakeAmount.add(autoGlideStakeAmount);
         console.log("sumStakedAmount", sumStakeAmount.toString());
+
         // total projectect glide per year
         let totalProjectedGlidePerYear = sumStakeAmount.mul(ethers.BigNumber.from(Math.round(stakingAPR * 10000)));
         totalProjectedGlidePerYear = totalProjectedGlidePerYear.div(10000);
@@ -238,15 +294,44 @@ cron.schedule("*/10 * * * *", async function () {
         //   await tx.wait();
         // }
 
-        // add glide reward
-        let tx = await phantzGlideContract
-          .connect(mnemonicWallet)
-          ["addGlideReward(address,uint256)"](key, glideReward.toString(), { gasLimit: 1000000 });
-        await tx.wait();
+        const balanceOldContract = await phantzGlideContractOld.glideRewards(key);
+
+        // if there is no balance on old PhantzGlideStake contract, then send amount to new one
+        if (balanceOldContract == 0) {
+          counter++;
+          addressesForSend.push(key);
+          amountsForSend.push(glideReward.toString());
+
+          if (counter > 50) {
+            // add glide reward
+            let txAddGlideReward = await phantzGlideContractNew
+              .connect(mnemonicWallet)
+              ["addGlideReward(address[],uint256[])"](addressesForSend, amountsForSend, { gasLimit: 1000000 });
+            await txAddGlideReward.wait();
+
+            addressesForSend = [];
+            amountsForSend = [];
+            counter = 0;
+          }
+        } else {
+          // add glide reward
+          let tx = await phantzGlideContractOld
+            .connect(mnemonicWallet)
+            ["addGlideReward(address,uint256)"](key, glideReward.toString(), { gasLimit: 1000000 });
+          await tx.wait();
+        }
       }
     }
 
-    let tx = await phantzGlideContract
+    // add glide reward
+    if (addressesForSend.length > 0 && amountsForSend.length > 0) {
+      let txAddGlideReward = await phantzGlideContractNew
+        .connect(mnemonicWallet)
+        ["addGlideReward(address[],uint256[])"](addressesForSend, amountsForSend, { gasLimit: 1000000 });
+      await txAddGlideReward.wait();
+    }
+
+    let tx = await phantzGlideContractOld
       .connect(mnemonicWallet)
       ["setLastUpdateBlock(uint256)"](currentBlock, { gasLimit: 1000000 });
     await tx.wait();
