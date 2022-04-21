@@ -9,7 +9,7 @@ const axios = require("axios");
 
 const mnemonic = secrets.mnemonic;
 
-const app = express(); // Initializing app
+// const app = express(); // Initializing app
 
 // const url = "http://localhost:8545";
 // const url = "https://api.elastos.io/eth";
@@ -19,7 +19,7 @@ const masterChefAddress = "0x7F5489f77Bb8515DE4e0582B60Eb63A7D9959821";
 const glideVaultAddress = "0xBe224bb2EFe1aE7437Ab428557d3054E63033dA9";
 const glideAddress = "0xd39eC832FF1CaaFAb2729c76dDeac967ABcA8F27";
 const phantzGlideStakeAddressOld = "0xbe080A1Fee90c12fC7F308590DC56929E407aA6E";
-const phantzGlideStakeAddressNew = "0xf40731508cD7a9870C2690420728ecE1b8335953";
+const phantzGlideStakeAddressNew = "0x6be4661405096e1dEEC1eD03250bB9d38aeA0804";
 
 const customHttpProvider = new ethers.providers.JsonRpcProvider(url);
 const mnemonicWallet = ethers.Wallet.fromMnemonic(mnemonic).connect(customHttpProvider);
@@ -38,27 +38,49 @@ const glideVaultContract = new ethers.Contract(glideVaultAddress, glideVaultCont
 
 const phantzGlideStakeParse = JSON.parse(fs.readFileSync("./contracts/PhantzGlideStake.json", "utf8"));
 const phantzGlideStakeABI = JSON.stringify(phantzGlideStakeParse);
-const phantzGlideContractOld = new ethers.Contract(phantzGlideStakeAddressOld, phantzGlideStakeABI, mnemonicWallet);
+// const phantzGlideContractOld = new ethers.Contract(phantzGlideStakeAddressOld, phantzGlideStakeABI, mnemonicWallet);
 const phantzGlideContractNew = new ethers.Contract(phantzGlideStakeAddressNew, phantzGlideStakeABI, mnemonicWallet);
 
 // Phantz - Glide
-// cron.schedule("*/60 * * * * *", async function () {
-cron.schedule("*/10 * * * *", async function () {
+// cron.schedule("*/30 * * * * *", async function () {
+// async function manualRun() {
+cron.schedule("0 */2 * * *", async function () {
   console.log("START PHANTZ - GLIDE");
 
-  const phantzCollectionUrl =
-    "https://assist.trinity-feeds.app/sticker/api/v1/query?creator=0x44016ed8638f5B517a5beC7a722A56d1DEBefef7";
+  // const phantzCollectionUrl =
+  //   "https://assist.trinity-feeds.app/sticker/api/v1/query?creator=0x44016ed8638f5B517a5beC7a722A56d1DEBefef7";
+  const phantzCollectionUrl = "https://ela.city/api/nftitems/fetchTokens";
+  const options = {
+    collectionAddresses: ["0xfdde60866508263e30c769e8592bb0f8c3274ba7"],
+    type: "single",
+  };
 
   function requestPhantzHolders(url) {
     return new Promise(function (resolve, reject) {
       try {
-        request(url, function (error, res, body) {
-          if (!error && res.statusCode == 200) {
-            resolve(body);
-          } else {
-            reject(error);
+        request.post(
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            url: phantzCollectionUrl,
+            body: JSON.stringify(options),
+          },
+          function (error, res, body) {
+            if (!error && res.statusCode == 200) {
+              resolve(body);
+            } else {
+              reject(error);
+            }
           }
-        });
+        );
+        // request(url, function (error, res, body) {
+        //   if (!error && res.statusCode == 200) {
+        //     resolve(body);
+        //   } else {
+        //     reject(error);
+        //   }
+        // });
       } catch (e) {
         console.error(e);
       }
@@ -86,12 +108,14 @@ cron.schedule("*/10 * * * *", async function () {
       let counterGlidePerBlock = startGlidePerBlock;
       let glideSumPerYear = ethers.BigNumber.from("0");
 
-      while(true) {
+      while (true) {
         // if it is last phase on year and should be finish calculation
         if (counterBlock.gte(currentBlock.add(blockPerYear))) {
           const blockDifference = counterBlock.sub(reductionPeriod);
-          glideSumPerYear = glideSumPerYear.add(counterGlidePerBlock.mul(currentBlock.add(blockPerYear).sub(blockDifference)));
-          break; 
+          glideSumPerYear = glideSumPerYear.add(
+            counterGlidePerBlock.mul(currentBlock.add(blockPerYear).sub(blockDifference))
+          );
+          break;
         } else {
           if (counterBlock.gt(counterCurrentBlock)) {
             // console.log(counterBlock.toString());
@@ -103,9 +127,13 @@ cron.schedule("*/10 * * * *", async function () {
 
           // updates
           if (phase == 0) {
-            counterGlidePerBlock = counterGlidePerBlock.mul(ethers.BigNumber.from("75")).div(ethers.BigNumber.from("100"));
+            counterGlidePerBlock = counterGlidePerBlock
+              .mul(ethers.BigNumber.from("75"))
+              .div(ethers.BigNumber.from("100"));
           } else {
-            counterGlidePerBlock = counterGlidePerBlock.mul(ethers.BigNumber.from("85")).div(ethers.BigNumber.from("100"));
+            counterGlidePerBlock = counterGlidePerBlock
+              .mul(ethers.BigNumber.from("85"))
+              .div(ethers.BigNumber.from("100"));
           }
           phase++;
           if (counterBlock.gte(counterCurrentBlock)) {
@@ -115,9 +143,13 @@ cron.schedule("*/10 * * * *", async function () {
         }
       }
 
-      const tokenDistributedToStakingPools = ethers.utils.formatEther(glideSumPerYear
-        .mul(ethers.BigNumber.from("65")).div(ethers.BigNumber.from("100"))
-        .mul(ethers.BigNumber.from("25")).div(ethers.BigNumber.from("100")));
+      const tokenDistributedToStakingPools = ethers.utils.formatEther(
+        glideSumPerYear
+          .mul(ethers.BigNumber.from("65"))
+          .div(ethers.BigNumber.from("100"))
+          .mul(ethers.BigNumber.from("25"))
+          .div(ethers.BigNumber.from("100"))
+      );
       return Math.trunc(tokenDistributedToStakingPools);
     } catch (e) {
       console.error(e);
@@ -135,8 +167,7 @@ cron.schedule("*/10 * * * *", async function () {
       return 0;
     }
 
-    if (masterChefGlideAmount == 0) 
-      return 0;
+    if (masterChefGlideAmount == 0) return 0;
 
     // This value for token distributed to staking pools per year currently is hardcoded, change that to real calculate
     return tokenDistributedToStakingPools / ethers.utils.formatEther(masterChefGlideAmount);
@@ -162,7 +193,7 @@ cron.schedule("*/10 * * * *", async function () {
 
   async function getLastUpdatedBlock() {
     try {
-      const lastUpdatedBlock = await phantzGlideContractOld.lastUpdatedBlock();
+      const lastUpdatedBlock = await phantzGlideContractNew.lastUpdatedBlock();
       return lastUpdatedBlock;
     } catch (error) {
       console.log("lastUpdatedBlock-error" + ": " + error);
@@ -170,22 +201,29 @@ cron.schedule("*/10 * * * *", async function () {
     }
   }
 
-  const tokenDistributedToStakingPools = await calculateGlidePerYear();
+  // const tokenDistributedToStakingPools = await calculateGlidePerYear();
+  const tokenDistributedToStakingPools = 2307649; // hard coded because lazy
   console.log("GlideSumPerYear: " + tokenDistributedToStakingPools);
 
   // Get phantz holders
   let fullResultString = await requestPhantzHolders(phantzCollectionUrl);
   let fullResult = JSON.parse(fullResultString);
+
+  // const filterPhantz = fullResult.data.tokens.filter((item) => {
+  //   // console.log(item.contractAddress === "0xfdde60866508263e30c769e8592bb0f8c3274ba7");
+  //   return item.contractAddress === "0xfdde60866508263e30c769e8592bb0f8c3274ba7";
+  // });
+
   const phantzHolders = new Map();
   try {
-    let resultData = fullResult["data"];
+    let resultData = fullResult["data"]["tokens"];
     for (let counter = 0; counter < resultData.length; counter++) {
       let item = resultData[counter];
-      let nftHolder = item["holder"];
-      if (phantzHolders.has(nftHolder)) {
+      let nftHolder = item["owner"] && item["owner"]["address"];
+      if (phantzHolders.has(nftHolder) & (nftHolder !== null)) {
         let nftHolderCount = phantzHolders.get(nftHolder);
         phantzHolders.set(nftHolder, nftHolderCount + 1);
-      } else {
+      } else if (nftHolder !== null) {
         phantzHolders.set(nftHolder, 1);
       }
     }
@@ -205,6 +243,7 @@ cron.schedule("*/10 * * * *", async function () {
 
     const glideTokenInstance = new ethers.Contract(glideAddress, IERC20ContractAbi, mnemonicWallet);
     const walletAddress = await mnemonicWallet.getAddress();
+    console.log("wallet address:" + walletAddress);
 
     const glideBalanceForMainAccount = await glideTokenInstance.balanceOf(walletAddress);
     console.log("glideBalanceForMainAccount: " + glideBalanceForMainAccount.toString());
@@ -294,32 +333,34 @@ cron.schedule("*/10 * * * *", async function () {
         //   await tx.wait();
         // }
 
-        const balanceOldContract = await phantzGlideContractOld.glideRewards(key);
+        // const balanceOldContract = await phantzGlideContractOld.glideRewards(key);
 
         // if there is no balance on old PhantzGlideStake contract, then send amount to new one
-        if (balanceOldContract == 0) {
-          counter++;
-          addressesForSend.push(key);
-          amountsForSend.push(glideReward.toString());
+        // if (balanceOldContract == 0) {
+        counter++;
+        addressesForSend.push(key.toString());
+        amountsForSend.push(glideReward.toString());
 
-          if (counter > 50) {
-            // add glide reward
-            let txAddGlideReward = await phantzGlideContractNew
-              .connect(mnemonicWallet)
-              ["addGlideReward(address[],uint256[])"](addressesForSend, amountsForSend, { gasLimit: 1000000 });
-            await txAddGlideReward.wait();
+        console.log(addressesForSend);
 
-            addressesForSend = [];
-            amountsForSend = [];
-            counter = 0;
-          }
-        } else {
+        if (counter > 40) {
           // add glide reward
-          let tx = await phantzGlideContractOld
+          let txAddGlideReward = await phantzGlideContractNew
             .connect(mnemonicWallet)
-            ["addGlideReward(address,uint256)"](key, glideReward.toString(), { gasLimit: 1000000 });
-          await tx.wait();
+            ["addGlideReward(address[],uint256[])"](addressesForSend, amountsForSend, { gasLimit: 8000000 });
+          await txAddGlideReward.wait();
+
+          addressesForSend = [];
+          amountsForSend = [];
+          counter = 0;
         }
+        // } else {
+        // add glide reward
+        // let tx = await phantzGlideContractOld
+        //   .connect(mnemonicWallet)
+        //   ["addGlideReward(address,uint256)"](key, glideReward.toString(), { gasLimit: 1000000 });
+        // await tx.wait();
+        // }
       }
     }
 
@@ -327,18 +368,21 @@ cron.schedule("*/10 * * * *", async function () {
     if (addressesForSend.length > 0 && amountsForSend.length > 0) {
       let txAddGlideReward = await phantzGlideContractNew
         .connect(mnemonicWallet)
-        ["addGlideReward(address[],uint256[])"](addressesForSend, amountsForSend, { gasLimit: 1000000 });
+        ["addGlideReward(address[],uint256[])"](addressesForSend, amountsForSend, { gasLimit: 8000000 });
       await txAddGlideReward.wait();
     }
 
-    let tx = await phantzGlideContractOld
+    let tx = await phantzGlideContractNew
       .connect(mnemonicWallet)
-      ["setLastUpdateBlock(uint256)"](currentBlock, { gasLimit: 1000000 });
+      ["setLastUpdateBlock(uint256)"](currentBlock, { gasLimit: 8000000 });
     await tx.wait();
   } catch (e) {
     console.error(e);
   }
   console.log("END PHANTZ - GLIDE");
 });
+// }
 
-app.listen(2822);
+// manualRun();
+
+// app.listen(2822);
